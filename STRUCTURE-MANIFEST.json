@@ -1,19 +1,37 @@
 {
   "schema_version": 1,
   "project": "Xevil-Termux-Toolkit",
-  "status": "PROPOSED_INITIAL_STRUCTURE",
+  "status": "IMPLEMENTED_BASELINE_SECURITY_HARDENING_IN_PROGRESS",
   "default_branch": "main",
   "runtime": "Termux on Android; Python 3.10+",
   "tools": [
-    {"name": "Image2Pdf", "path": "tools/trinetra-pdf.py", "status": "implemented; device validation pending"},
-    {"name": "MergePdf", "path": "tools/merge-pdf.py", "status": "implemented; device validation pending"},
-    {"name": "pdf2md", "path": "tools/pdf2md.py", "status": "implemented; device validation pending"}
+    {
+      "name": "Image2Pdf",
+      "path": "tools/trinetra-pdf.py",
+      "status": "implemented; functional Termux device validation reported; expanded security tests pending"
+    },
+    {
+      "name": "MergePdf",
+      "path": "tools/merge-pdf.py",
+      "status": "implemented; functional Termux device validation reported; expanded security tests pending"
+    },
+    {
+      "name": "pdf2md",
+      "path": "tools/pdf2md.py",
+      "status": "implemented; functional Termux device validation reported; expanded security tests pending"
+    }
   ],
-  "directories": ["tools", "tests", "docs", ".github/workflows"],
+  "directories": [
+    "tools",
+    "tests",
+    "docs",
+    ".github/workflows"
+  ],
   "license": "UNSPECIFIED",
   "deployment": "NONE; local Termux utilities",
   "notes": [
-    "This manifest describes the proposed repository layout, not a deployed service.",
+    "The manifest describes the proposed repository layout, not a deployed service.",
+    "Functional Termux device validation is reported; it is not a security certification.",
     "The original Termux startup configuration and tools registry are intentionally excluded."
   ]
 }

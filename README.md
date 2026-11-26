@@ -39,8 +39,8 @@ The screenshot converter reads from `~/storage/pictures/Screenshots` and writes 
 
 - Image2Pdf creates a temporary PDF beside the destination, validates its page count, and atomically replaces the destination only when at least one image was added.
 - MergePdf validates selected inputs and validates the generated output before replacement.
-- PDF2MD uses unique temporary output files and 180-second per-process timeouts for ImageMagick and Tesseract.
-- PDF2MD currently records the source's full local path in its Markdown metadata. Review that metadata before sharing the Markdown file.
+- PDF2MD enforces input-size, page-count, and per-page rendered-pixel limits, ImageMagick resource limits, per-process timeouts, and a best-effort 30-minute elapsed-time budget. The budget cannot forcibly interrupt synchronous PDF parsing or filesystem operations.
+- PDF2MD omits the absolute source path by default. The conversion function supports explicit path inclusion for workflows that require it.
 - OCR output is approximate and may lose layout, tables, columns, and non-English text. Review extracted content before relying on it.
 - These tools process local files. They do not send files to a network service.
 
@@ -56,4 +56,4 @@ See `docs/SECURITY.md` and `docs/USAGE.md` for additional details.
 
 ## Project status
 
-This is an engineering baseline. Functional tests in this repository do not replace device-level validation on Termux/Android. No deployment target is configured.
+This is a local Termux utility baseline. Functional tests and reported device checks do not constitute a security certification. PDF-processing hardening is ongoing; no deployment target is configured.

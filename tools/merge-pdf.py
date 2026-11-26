@@ -244,81 +244,76 @@ def make_title_page(source_page, filename):
 def load_pdf(path):
     reader = PdfReader(str(path), strict=False)
 
-    if reader.is_encrypted:
-        raise ValueError("Encrypted/password-protected PDFs are not supported.")
-
-    if len(reader.pages) == 0:
-        raise ValueError("PDF contains no pages.")
-
-    return reader
+    try:
+        if reader.is_encrypted:
+            raise ValueError("Encrypted/password-protected PDFs are not supported.")
+        if len(reader.pages) == 0:
+            raise ValueError("PDF contains no pages.")
+        return reader
+    except Exception:
+        reader.close()
+        raise
 
 
 def merge_pdfs(selected, output_path):
+    if len(selected) < 2:
+        raise ValueError("Select at least two PDF files.")
+
     writer = PdfWriter()
     total_pages = 0
-
-    # Validate all files before constructing the output.
     readers = []
-
-    heading("VALIDATING SELECTED PDF FILES")
-
-    for path in selected:
-        print(f"Checking: {path.name}")
-        reader = load_pdf(path)
-        readers.append((path, reader))
-        total_pages += len(reader.pages)
-
-    print(f"\nFiles validated: {len(readers)}")
-    print(f"Total pages: {total_pages}")
-
-    for file_index, (path, reader) in enumerate(readers, 1):
-        print(f"\nMerging {file_index}/{len(readers)}: {path.name}")
-
-        for page_index, page in enumerate(reader.pages):
-            if page_index == 0:
-                page = make_title_page(page, path.name)
-
-            writer.add_page(page)
-
-    writer.add_metadata({
-        "/Title": output_path.stem,
-        "/Subject": "Merged PDF created with X-Evil Network MergePdf",
-        "/Producer": "X-Evil Network MergePdf"
-    })
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Write to a temporary file first, then replace the destination.
     temp_path = None
 
     try:
+        heading("VALIDATING SELECTED PDF FILES")
+        for path in selected:
+            print(f"Checking: {path.name}")
+            reader = load_pdf(path)
+            readers.append((path, reader))
+            total_pages += len(reader.pages)
+
+        print(f"\nFiles validated: {len(readers)}")
+        print(f"Total pages: {total_pages}")
+
+        for file_index, (path, reader) in enumerate(readers, 1):
+            print(f"\nMerging {file_index}/{len(readers)}: {path.name}")
+            for page_index, page in enumerate(reader.pages):
+                if page_index == 0:
+                    page = make_title_page(page, path.name)
+                writer.add_page(page)
+
+        writer.add_metadata({
+            "/Title": output_path.stem,
+            "/Subject": "Merged PDF created with X-Evil Network MergePdf",
+            "/Producer": "X-Evil Network MergePdf"
+        })
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
-            mode="wb",
-            suffix=".pdf",
-            prefix=".mergepdf-",
-            dir=output_path.parent,
-            delete=False
+            mode="wb", suffix=".pdf", prefix=".mergepdf-",
+            dir=output_path.parent, delete=False
         ) as temp:
             temp_path = Path(temp.name)
             writer.write(temp)
 
-        if not temp_path.exists() or temp_path.stat().st_size == 0:
+        if not temp_path.is_file() or temp_path.stat().st_size == 0:
             raise RuntimeError("Output validation failed: empty PDF.")
 
-        # Confirm that the generated PDF can be opened.
         check = PdfReader(str(temp_path), strict=False)
-        if check.is_encrypted or len(check.pages) != total_pages:
-            raise RuntimeError("Output validation failed: page count mismatch.")
+        try:
+            if check.is_encrypted or len(check.pages) != total_pages:
+                raise RuntimeError("Output validation failed: page count mismatch.")
+        finally:
+            check.close()
 
         os.replace(temp_path, output_path)
-
-    except Exception:
-        if temp_path and temp_path.exists():
-            temp_path.unlink()
-        raise
-
-    return total_pages
-
+        temp_path = None
+        return total_pages
+    finally:
+        for _, reader in readers:
+            reader.close()
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 def choose_output_folder():
     heading("OUTPUT LOCATION")
