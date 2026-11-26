@@ -106,6 +106,36 @@ class Pdf2MdTests(unittest.TestCase):
                 pdf2md.convert_pdf(source, output, include_source_path=True)
             self.assertIn(str(source.resolve()), output.read_text(encoding="utf-8"))
 
+    def test_conversion_deadline_begins_before_pdf_reader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "input.pdf"
+            pdf = canvas.Canvas(str(source))
+            pdf.drawString(50, 750, "test")
+            pdf.save()
+
+            events = []
+
+            def fake_clock():
+                events.append("clock")
+                return 0.0
+
+            def fake_reader(*args, **kwargs):
+                events.append("reader")
+                raise RuntimeError("parser reached")
+
+            with patch.object(
+                pdf2md.time, "monotonic", side_effect=fake_clock
+            ), patch.object(
+                pdf2md, "PdfReader", side_effect=fake_reader
+            ):
+                with self.assertRaisesRegex(RuntimeError, "parser reached"):
+                    pdf2md.convert_pdf(source, root / "result.md")
+
+            self.assertIn("clock", events)
+            self.assertIn("reader", events)
+            self.assertLess(events.index("clock"), events.index("reader"))
+
     def test_conversion_rejects_oversized_source_before_parsing(self):
         with tempfile.TemporaryDirectory() as tmp:
             source = Path(tmp) / "large.pdf"

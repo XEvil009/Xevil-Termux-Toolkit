@@ -177,8 +177,19 @@ def clean_ocr_text(text):
     return result.strip()
 
 
-def validate_pdf_limits(source, reader):
-    """Reject PDFs whose input size, page count, or render geometry is excessive."""
+def _check_deadline(deadline, phase):
+    if time.monotonic() >= deadline:
+        raise TimeoutError(
+            f"PDF conversion exceeded its "
+            f"{MAX_CONVERSION_SECONDS // 60}-minute "
+            f"time budget during {phase}."
+        )
+
+
+def validate_pdf_limits(source, reader, deadline=None):
+    """Reject excessive PDFs and check the best-effort time budget."""
+    if deadline is not None:
+        _check_deadline(deadline, "PDF validation")
     if not source.is_file():
         raise ValueError("Source PDF is not a regular file.")
     if source.stat().st_size > MAX_PDF_BYTES:
@@ -187,12 +198,16 @@ def validate_pdf_limits(source, reader):
         )
 
     total = len(reader.pages)
+    if deadline is not None:
+        _check_deadline(deadline, "page-count validation")
     if total < 1:
         raise ValueError("PDF contains no pages.")
     if total > MAX_PDF_PAGES:
         raise ValueError(f"PDF exceeds the {MAX_PDF_PAGES}-page conversion limit.")
 
     for page_number, page in enumerate(reader.pages, 1):
+        if deadline is not None:
+            _check_deadline(deadline, f"page {page_number} validation")
         width = float(page.mediabox.width)
         height = float(page.mediabox.height)
         user_unit = float(page.get("/UserUnit", 1))
@@ -216,6 +231,8 @@ def validate_pdf_limits(source, reader):
                 f"Page {page_number} exceeds the rendered-image pixel limit "
                 f"({MAX_PAGE_PIXELS:,} pixels)."
             )
+        if deadline is not None:
+            _check_deadline(deadline, f"page {page_number} validation")
     return total
 
 
@@ -283,7 +300,9 @@ def render_and_ocr(source, page_index, image_path, deadline):
 
 
 def convert_pdf(source, destination, include_source_path=False):
-    """Convert a bounded PDF to Markdown; source paths are private by default."""
+    """Convert a bounded PDF using a best-effort elapsed-time budget."""
+    deadline = time.monotonic() + MAX_CONVERSION_SECONDS
+    _check_deadline(deadline, "input validation")
     if not source.is_file():
         raise ValueError("Source PDF is not a regular file.")
     if source.stat().st_size > MAX_PDF_BYTES:
@@ -292,9 +311,10 @@ def convert_pdf(source, destination, include_source_path=False):
         )
     reader = PdfReader(str(source), strict=False)
     try:
+        _check_deadline(deadline, "PDF parsing")
         if reader.is_encrypted:
             raise ValueError("Encrypted PDFs are not supported.")
-        total = validate_pdf_limits(source, reader)
+        total = validate_pdf_limits(source, reader, deadline=deadline)
 
         converted_at = datetime.now().astimezone().isoformat(
             timespec="seconds"
@@ -324,16 +344,17 @@ def convert_pdf(source, destination, include_source_path=False):
             ])
         lines.extend(["", "---", ""])
 
-        deadline = time.monotonic() + MAX_CONVERSION_SECONDS
         with tempfile.TemporaryDirectory(prefix="pdf2md_") as temp:
             image_path = Path(temp) / "page.png"
             for index in range(total):
+                _check_deadline(deadline, f"before page {index + 1} rendering")
                 print(
                     f"\rRendering and OCR: page {index + 1}/{total}",
                     end="",
                     flush=True
                 )
                 text = render_and_ocr(source, index, image_path, deadline)
+                _check_deadline(deadline, f"after page {index + 1} OCR")
                 lines.extend([
                     f"## Page {index + 1}",
                     "",
@@ -345,6 +366,7 @@ def convert_pdf(source, destination, include_source_path=False):
     finally:
         reader.close()
 
+    _check_deadline(deadline, "output preparation")
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
     try:
@@ -357,6 +379,7 @@ def convert_pdf(source, destination, include_source_path=False):
             handle.write("\n".join(lines).rstrip() + "\n")
             handle.flush()
             os.fsync(handle.fileno())
+        _check_deadline(deadline, "before output publication")
         os.replace(temporary, destination)
         temporary = None
     finally:
