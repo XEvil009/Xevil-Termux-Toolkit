@@ -242,8 +242,7 @@ def make_title_page(source_page, filename):
 
 
 def load_pdf(path):
-    data = path.read_bytes()
-    reader = PdfReader(BytesIO(data), strict=False)
+    reader = PdfReader(str(path), strict=False)
 
     if reader.is_encrypted:
         raise ValueError("Encrypted/password-protected PDFs are not supported.")
