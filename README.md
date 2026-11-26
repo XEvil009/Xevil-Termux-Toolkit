@@ -39,7 +39,7 @@ The screenshot converter reads from `~/storage/pictures/Screenshots` and writes 
 
 - Image2Pdf creates a temporary PDF beside the destination, validates its page count, and atomically replaces the destination only when at least one image was added.
 - MergePdf validates selected inputs and validates the generated output before replacement.
-- PDF2MD enforces input-size, page-count, and per-page rendered-pixel limits, ImageMagick resource limits, a total conversion deadline, and per-process timeouts.
+- PDF2MD enforces input-size, page-count, and per-page rendered-pixel limits, ImageMagick resource limits, per-process timeouts, and a best-effort 30-minute elapsed-time budget. The budget cannot forcibly interrupt synchronous PDF parsing or filesystem operations.
 - PDF2MD omits the absolute source path by default. The conversion function supports explicit path inclusion for workflows that require it.
 - OCR output is approximate and may lose layout, tables, columns, and non-English text. Review extracted content before relying on it.
 - These tools process local files. They do not send files to a network service.
