@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "project": "Xevil-Termux-Toolkit",
+  "status": "PROPOSED_INITIAL_STRUCTURE",
+  "default_branch": "main",
+  "runtime": "Termux on Android; Python 3.10+",
+  "tools": [
+    {"name": "Image2Pdf", "path": "tools/trinetra-pdf.py", "status": "implemented; device validation pending"},
+    {"name": "MergePdf", "path": "tools/merge-pdf.py", "status": "implemented; device validation pending"},
+    {"name": "pdf2md", "path": "tools/pdf2md.py", "status": "implemented; device validation pending"}
+  ],
+  "directories": ["tools", "tests", "docs", ".github/workflows"],
+  "license": "UNSPECIFIED",
+  "deployment": "NONE; local Termux utilities",
+  "notes": [
+    "This manifest describes the proposed repository layout, not a deployed service.",
+    "The original Termux startup configuration and tools registry are intentionally excluded."
+  ]
+}
