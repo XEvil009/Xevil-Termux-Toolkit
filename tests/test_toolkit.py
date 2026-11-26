@@ -80,6 +80,69 @@ class MergePdfTests(unittest.TestCase):
 
 
 class Pdf2MdTests(unittest.TestCase):
+    def test_conversion_omits_absolute_source_path_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "private-input.pdf"
+            pdf = canvas.Canvas(str(source))
+            pdf.drawString(50, 750, "private test")
+            pdf.save()
+            output = root / "result.md"
+            with patch.object(pdf2md, "render_and_ocr", return_value="recognized text"):
+                pdf2md.convert_pdf(source, output)
+            content = output.read_text(encoding="utf-8")
+            self.assertNotIn(str(source.resolve()), content)
+            self.assertIn("private-input.pdf", content)
+
+    def test_conversion_can_explicitly_include_source_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "input.pdf"
+            pdf = canvas.Canvas(str(source))
+            pdf.drawString(50, 750, "test")
+            pdf.save()
+            output = root / "result.md"
+            with patch.object(pdf2md, "render_and_ocr", return_value="recognized text"):
+                pdf2md.convert_pdf(source, output, include_source_path=True)
+            self.assertIn(str(source.resolve()), output.read_text(encoding="utf-8"))
+
+    def test_conversion_rejects_oversized_source_before_parsing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp) / "large.pdf"
+            source.write_bytes(b"not parsed")
+            with patch.object(pdf2md, "MAX_PDF_BYTES", 4):
+                with self.assertRaisesRegex(ValueError, "input limit"):
+                    pdf2md.convert_pdf(source, Path(tmp) / "result.md")
+
+    def test_pdf_limits_reject_excessive_render_dimensions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "oversized-page.pdf"
+            pdf = canvas.Canvas(str(source), pagesize=(5000, 5000))
+            pdf.drawString(50, 4950, "oversized")
+            pdf.save()
+            reader = PdfReader(str(source))
+            try:
+                with self.assertRaisesRegex(ValueError, "pixel limit"):
+                    pdf2md.validate_pdf_limits(source, reader)
+            finally:
+                reader.close()
+
+    def test_pdf_limits_reject_excessive_page_count(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "many-pages.pdf"
+            pdf = canvas.Canvas(str(source))
+            for _ in range(pdf2md.MAX_PDF_PAGES + 1):
+                pdf.showPage()
+            pdf.save()
+            reader = PdfReader(str(source))
+            try:
+                with self.assertRaisesRegex(ValueError, "page conversion limit"):
+                    pdf2md.validate_pdf_limits(source, reader)
+            finally:
+                reader.close()
+
     def test_conversion_uses_unique_atomic_temp_and_writes_pages(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

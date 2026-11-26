@@ -12,6 +12,6 @@ Run `python tools/merge-pdf.py` or `MergePdf`. Browse to a folder in existing Te
 
 ## PDF2MD
 
-Run `python tools/pdf2md.py` or `pdf2md`. Choose the source PDF, output filename, and output folder. Each page is rendered with ImageMagick and OCR is performed by Tesseract using English (`eng`) and page segmentation mode 11. Each external process has a 180-second timeout.
+Run `python tools/pdf2md.py` or `pdf2md`. Choose the source PDF, output filename, and output folder. Each page is rendered with ImageMagick and OCR is performed by Tesseract using English (`eng`) and page segmentation mode 11. Input files are limited to 100 MiB and 100 pages; each page is limited to 40 million rendered pixels at 220 DPI. ImageMagick has explicit resource limits, each external process has a 180-second timeout, and the complete conversion is limited to 30 minutes. Absolute source-path metadata is omitted by default.
 
 OCR is not a faithful document-layout conversion. Check the resulting Markdown, especially tables, small print, multi-column pages, diagrams, and non-English content.

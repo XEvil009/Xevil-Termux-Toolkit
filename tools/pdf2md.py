@@ -1,6 +1,8 @@
 from pathlib import Path
 from datetime import datetime
+import math
 import subprocess
+import time
 import tempfile
 import shutil
 import os
@@ -15,6 +17,12 @@ except ImportError:
 SHARED = (Path.home() / "storage" / "shared").resolve()
 MAGICK = shutil.which("magick")
 TESSERACT = shutil.which("tesseract")
+MAX_PDF_BYTES = 100 * 1024 * 1024
+MAX_PDF_PAGES = 100
+RENDER_DPI = 220
+MAX_PAGE_PIXELS = 40_000_000
+MAX_CONVERSION_SECONDS = 30 * 60
+PROCESS_TIMEOUT_SECONDS = 180
 
 def cancel(message="Operation cancelled."):
     print(f"\n{message}")
@@ -169,13 +177,66 @@ def clean_ocr_text(text):
     return result.strip()
 
 
-def render_and_ocr(source, page_index, image_path):
-    page_argument = f"{source}[{page_index}]"
+def validate_pdf_limits(source, reader):
+    """Reject PDFs whose input size, page count, or render geometry is excessive."""
+    if not source.is_file():
+        raise ValueError("Source PDF is not a regular file.")
+    if source.stat().st_size > MAX_PDF_BYTES:
+        raise ValueError(
+            f"PDF exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MiB input limit."
+        )
 
+    total = len(reader.pages)
+    if total < 1:
+        raise ValueError("PDF contains no pages.")
+    if total > MAX_PDF_PAGES:
+        raise ValueError(f"PDF exceeds the {MAX_PDF_PAGES}-page conversion limit.")
+
+    for page_number, page in enumerate(reader.pages, 1):
+        width = float(page.mediabox.width)
+        height = float(page.mediabox.height)
+        user_unit = float(page.get("/UserUnit", 1))
+        if (not math.isfinite(width) or not math.isfinite(height)
+                or not math.isfinite(user_unit) or width <= 0
+                or height <= 0 or user_unit <= 0):
+            raise ValueError(f"Page {page_number} has invalid dimensions.")
+        width_scaled = width * user_unit * RENDER_DPI / 72
+        height_scaled = height * user_unit * RENDER_DPI / 72
+        if (not math.isfinite(width_scaled) or not math.isfinite(height_scaled)
+                or width_scaled > MAX_PAGE_PIXELS
+                or height_scaled > MAX_PAGE_PIXELS):
+            raise ValueError(
+                f"Page {page_number} exceeds the rendered-image pixel limit "
+                f"({MAX_PAGE_PIXELS:,} pixels)."
+            )
+        width_px = math.ceil(width_scaled)
+        height_px = math.ceil(height_scaled)
+        if width_px <= 0 or height_px <= 0 or width_px * height_px > MAX_PAGE_PIXELS:
+            raise ValueError(
+                f"Page {page_number} exceeds the rendered-image pixel limit "
+                f"({MAX_PAGE_PIXELS:,} pixels)."
+            )
+    return total
+
+
+def _remaining_timeout(deadline):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("PDF conversion exceeded its total time limit.")
+    return min(PROCESS_TIMEOUT_SECONDS, remaining)
+
+
+def render_and_ocr(source, page_index, image_path, deadline):
+    page_argument = f"{source}[{page_index}]"
     render = subprocess.run(
         [
             MAGICK,
-            "-density", "220",
+            "-limit", "memory", "256MiB",
+            "-limit", "map", "512MiB",
+            "-limit", "disk", "1GiB",
+            "-limit", "time", str(PROCESS_TIMEOUT_SECONDS),
+            "-limit", "thread", "2",
+            "-density", str(RENDER_DPI),
             page_argument,
             "-background", "white",
             "-alpha", "remove",
@@ -189,7 +250,7 @@ def render_and_ocr(source, page_index, image_path):
         ],
         capture_output=True,
         text=True,
-        timeout=180
+        timeout=_remaining_timeout(deadline)
     )
 
     if render.returncode != 0 or not image_path.is_file():
@@ -209,7 +270,7 @@ def render_and_ocr(source, page_index, image_path):
         ],
         capture_output=True,
         text=True,
-        timeout=180
+        timeout=_remaining_timeout(deadline)
     )
 
     if ocr.returncode != 0:
@@ -220,63 +281,69 @@ def render_and_ocr(source, page_index, image_path):
 
     return clean_ocr_text(ocr.stdout)
 
-def convert_pdf(source, destination):
+
+def convert_pdf(source, destination, include_source_path=False):
+    """Convert a bounded PDF to Markdown; source paths are private by default."""
+    if not source.is_file():
+        raise ValueError("Source PDF is not a regular file.")
+    if source.stat().st_size > MAX_PDF_BYTES:
+        raise ValueError(
+            f"PDF exceeds the {MAX_PDF_BYTES // (1024 * 1024)} MiB input limit."
+        )
     reader = PdfReader(str(source), strict=False)
+    try:
+        if reader.is_encrypted:
+            raise ValueError("Encrypted PDFs are not supported.")
+        total = validate_pdf_limits(source, reader)
 
-    if reader.is_encrypted:
-        raise ValueError("Encrypted PDFs are not supported.")
+        converted_at = datetime.now().astimezone().isoformat(
+            timespec="seconds"
+        )
 
-    total = len(reader.pages)
-    if total < 1:
-        raise ValueError("PDF contains no pages.")
-
-    converted_at = datetime.now().astimezone().isoformat(
-        timespec="seconds"
-    )
-
-    lines = [
-        f"# {source.name}",
-        "",
-        "> OCR-generated Markdown document",
-        "",
-        "## Source reference",
-        "",
-        f"- **PDF filename:** `{source.name.replace(chr(96), chr(92) + chr(96))}`",
-        f"- **Page count:** {total}",
-        f"- **Converted:** {converted_at}",
-        "- **OCR engine:** Tesseract 5 (English)",
-        "- **Image processing:** ImageMagick",
-        "",
-        "**Full source location:**",
-        "",
-        "```text",
-        str(source.resolve()),
-        "```",
-        "",
-        "---",
-        ""
-    ]
-
-    with tempfile.TemporaryDirectory(prefix="pdf2md_") as temp:
-        image_path = Path(temp) / "page.png"
-
-        for index in range(total):
-            print(
-                f"\rRendering and OCR: page {index + 1}/{total}",
-                end="",
-                flush=True
-            )
-
-            text = render_and_ocr(source, index, image_path)
-
+        lines = [
+            f"# {source.name}",
+            "",
+            "> OCR-generated Markdown document",
+            "",
+            "## Source reference",
+            "",
+            f"- **PDF filename:** `{source.name.replace(chr(96), chr(92) + chr(96))}`",
+            f"- **Page count:** {total}",
+            f"- **Converted:** {converted_at}",
+            "- **OCR engine:** Tesseract (English)",
+            "- **Image processing:** ImageMagick",
+        ]
+        if include_source_path:
             lines.extend([
-                f"## Page {index + 1}",
                 "",
-                text if text else "*No readable text detected on this page.*",
+                "**Full source location (sensitive):**",
                 "",
-                "---",
-                ""
+                "```text",
+                str(source.resolve()),
+                "```",
             ])
+        lines.extend(["", "---", ""])
+
+        deadline = time.monotonic() + MAX_CONVERSION_SECONDS
+        with tempfile.TemporaryDirectory(prefix="pdf2md_") as temp:
+            image_path = Path(temp) / "page.png"
+            for index in range(total):
+                print(
+                    f"\rRendering and OCR: page {index + 1}/{total}",
+                    end="",
+                    flush=True
+                )
+                text = render_and_ocr(source, index, image_path, deadline)
+                lines.extend([
+                    f"## Page {index + 1}",
+                    "",
+                    text if text else "*No readable text detected on this page.*",
+                    "",
+                    "---",
+                    ""
+                ])
+    finally:
+        reader.close()
 
     destination.parent.mkdir(parents=True, exist_ok=True)
     temporary = None

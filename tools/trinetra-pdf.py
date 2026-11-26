@@ -65,8 +65,11 @@ def validate_pdf(path: Path, expected_pages: int) -> None:
     if not path.is_file() or path.stat().st_size == 0:
         raise RuntimeError("Generated PDF is empty or missing.")
     check = PdfReader(str(path), strict=False)
-    if check.is_encrypted or len(check.pages) != expected_pages:
-        raise RuntimeError("Generated PDF failed page-count validation.")
+    try:
+        if check.is_encrypted or len(check.pages) != expected_pages:
+            raise RuntimeError("Generated PDF failed page-count validation.")
+    finally:
+        check.close()
 
 
 def create_pdf(selected: list[Path], destination: Path) -> tuple[int, list[tuple[str, str]]]:
